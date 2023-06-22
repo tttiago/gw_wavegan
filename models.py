@@ -95,7 +95,7 @@ class Conv1D(nn.Module):
         x = F.leaky_relu(x, negative_slope=self.alpha)
         if self.use_phase_shuffle:
             x = self.phase_shuffle(x)
-        if self.use_drop:
+        if self.use_dropout:
             x = self.dropout(x)
         return x
 
@@ -186,13 +186,11 @@ class WaveGANGenerator(nn.Module):
         self.bn1 = nn.BatchNorm1d(num_features=16 * self.d)
 
         deconv_layers = [
-            Transpose1dLayer(
-                16 * self.d, 8 * self.d, 25, stride=11, use_batch_norm=use_batch_norm
-            ),
-            Transpose1dLayer(8 * self.d, 4 * self.d, 25, stride=11, use_batch_norm=use_batch_norm),
-            Transpose1dLayer(4 * self.d, 2 * self.d, 25, stride=11, use_batch_norm=use_batch_norm),
-            Transpose1dLayer(2 * self.d, 1 * self.d, 25, stride=11, use_batch_norm=use_batch_norm),
-            Transpose1dLayer(1 * self.d, 1 * self.c, 25, stride=11, use_batch_norm=use_batch_norm),
+            Transpose1dLayer(16 * self.d, 8 * self.d, 25, stride=4, use_batch_norm=use_batch_norm),
+            Transpose1dLayer(8 * self.d, 4 * self.d, 25, stride=4, use_batch_norm=use_batch_norm),
+            Transpose1dLayer(4 * self.d, 2 * self.d, 25, stride=4, use_batch_norm=use_batch_norm),
+            Transpose1dLayer(2 * self.d, 1 * self.d, 25, stride=4, use_batch_norm=use_batch_norm),
+            Transpose1dLayer(1 * self.d, 1 * self.c, 25, stride=4, use_batch_norm=use_batch_norm),
         ]
         self.deconv_layers = nn.ModuleList(deconv_layers)
 
