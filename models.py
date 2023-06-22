@@ -114,8 +114,8 @@ class PhaseShuffle(nn.Module):
         """Initialize PhaseShuffle block.
 
         Args:
-            shift_factor (int): The maximum number of samples by which an axis
-                                can be shifted in each direction.
+            shift_factor (int): The maximum number of samples, known as n in the WaveGAN paper,
+                                by which an axis can be shifted in each direction.
         """
         super().__init__()
         self.shift_factor = shift_factor
@@ -179,50 +179,41 @@ class WaveGANGenerator(nn.Module):
         self.latent_dim = noise_latent_dim
         self.d = model_dim
         self.c = num_channels
-        self.verbose = verbose
         self.use_batch_norm = use_batch_norm
-
-        self.stride = 4
+        self.verbose = verbose
 
         self.fc1 = nn.Linear(self.latent_dim, 256 * self.d)
         self.bn1 = nn.BatchNorm1d(num_features=16 * self.d)
 
         deconv_layers = [
             Transpose1dLayer(
-                16 * self.d, 8 * self.d, 25, self.stride, use_batch_norm=use_batch_norm
+                16 * self.d, 8 * self.d, 25, stride=11, use_batch_norm=use_batch_norm
             ),
-            Transpose1dLayer(
-                8 * self.d, 4 * self.d, 25, self.stride, use_batch_norm=use_batch_norm
-            ),
-            Transpose1dLayer(
-                4 * self.d, 2 * self.d, 25, self.stride, use_batch_norm=use_batch_norm
-            ),
-            Transpose1dLayer(
-                2 * self.d, 1 * self.d, 25, self.stride, use_batch_norm=use_batch_norm
-            ),
-            Transpose1dLayer(
-                1 * self.d, 1 * self.c, 25, self.stride, use_batch_norm=use_batch_norm
-            ),
+            Transpose1dLayer(8 * self.d, 4 * self.d, 25, stride=11, use_batch_norm=use_batch_norm),
+            Transpose1dLayer(4 * self.d, 2 * self.d, 25, stride=11, use_batch_norm=use_batch_norm),
+            Transpose1dLayer(2 * self.d, 1 * self.d, 25, stride=11, use_batch_norm=use_batch_norm),
+            Transpose1dLayer(1 * self.d, 1 * self.c, 25, stride=11, use_batch_norm=use_batch_norm),
         ]
+        self.deconv_layers = nn.ModuleList(deconv_layers)
 
-        self.deconv_list = nn.ModuleList(deconv_layers)
+        # Weight initialization.
         for m in self.modules():
             if isinstance(m, nn.ConvTranspose1d) or isinstance(m, nn.Linear):
                 nn.init.kaiming_normal_(m.weight.data)
 
     def forward(self, x):
-        x = self.fc1(x).view(-1, self.dim_mul * self.d, 16)
+        x = self.fc1(x).view(-1, 16 * self.d, 16)
         if self.use_batch_norm:
             x = self.bn1(x)
         x = F.relu(x)
         if self.verbose:
             print(x.shape)
 
-        for deconv in self.deconv_list[:-1]:
+        for deconv in self.deconv_layers[:-1]:
             x = F.relu(deconv(x))
             if self.verbose:
                 print(x.shape)
-        output = torch.tanh(self.deconv_list[-1](x))
+        output = torch.tanh(self.deconv_layers[-1](x))
         return output
 
 
@@ -231,30 +222,43 @@ class WaveGANDiscriminator(nn.Module):
 
     def __init__(
         self,
-        model_size=64,
-        ngpus=1,
         num_channels=1,
+        model_dim=64,
+        input_size=16384,
         shift_factor=2,
         alpha=0.2,
-        verbose=False,
-        slice_len=16384,
         use_batch_norm=False,
+        verbose=False,
     ):
-        super().__init__()
-        assert slice_len in [16384, 32768, 65536]  # used to predict longer utterances
+        """Initialize the WaveGAN discriminator.
 
-        self.model_size = model_size  # d
-        self.ngpus = ngpus
-        self.use_batch_norm = use_batch_norm
-        self.num_channels = num_channels  # c
-        self.shift_factor = shift_factor  # n
+        Args:
+            num_channels (int, optional): Number of channels. Defaults to 1.
+            model_dim (int, optional): Model dimensionality (known as d in the WaveGAN paper).
+                                       Defaults to 64.
+            input_size (int, optional): Size of the input. Defaults to 16384.
+            shift_factor (int, optional): The maximum number of samples, known as n in the
+                                          WaveGAN paper, by which an axis can be shifted
+                                          in each direction. Defaults to 2.
+            alpha (float, optional): Slope of the negative part of the LeakyRELU. Defaults to 0.2.
+            use_batch_norm (bool, optional): Whether to use batch normalization. Defaults to False.
+            verbose (bool, optional): Whether to print tensor shapes. Defaults to False.
+        """
+
+        super().__init__()
+        assert input_size == 16384, "Only output_size of 16384 is implemented."
+
+        self.d = model_dim
+        self.c = num_channels
+        self.n = shift_factor
         self.alpha = alpha
+        self.use_batch_norm = use_batch_norm
         self.verbose = verbose
 
         conv_layers = [
             Conv1D(
-                num_channels,
-                model_size,
+                self.c,
+                self.d,
                 25,
                 stride=4,
                 padding=11,
@@ -263,8 +267,8 @@ class WaveGANDiscriminator(nn.Module):
                 shift_factor=shift_factor,
             ),
             Conv1D(
-                model_size,
-                2 * model_size,
+                self.d,
+                2 * self.d,
                 25,
                 stride=4,
                 padding=11,
@@ -273,8 +277,8 @@ class WaveGANDiscriminator(nn.Module):
                 shift_factor=shift_factor,
             ),
             Conv1D(
-                2 * model_size,
-                4 * model_size,
+                2 * self.d,
+                4 * self.d,
                 25,
                 stride=4,
                 padding=11,
@@ -283,8 +287,8 @@ class WaveGANDiscriminator(nn.Module):
                 shift_factor=shift_factor,
             ),
             Conv1D(
-                4 * model_size,
-                8 * model_size,
+                4 * self.d,
+                8 * self.d,
                 25,
                 stride=4,
                 padding=11,
@@ -293,50 +297,21 @@ class WaveGANDiscriminator(nn.Module):
                 shift_factor=shift_factor,
             ),
             Conv1D(
-                8 * model_size,
-                16 * model_size,
+                8 * self.d,
+                16 * self.d,
                 25,
                 stride=4,
                 padding=11,
                 use_batch_norm=use_batch_norm,
                 alpha=alpha,
-                shift_factor=0 if slice_len == 16384 else shift_factor,
+                shift_factor=0,
             ),
         ]
-        self.fc_input_size = 256 * model_size
-        if slice_len == 32768:
-            conv_layers.append(
-                Conv1D(
-                    16 * model_size,
-                    32 * model_size,
-                    25,
-                    stride=2,
-                    padding=11,
-                    use_batch_norm=use_batch_norm,
-                    alpha=alpha,
-                    shift_factor=0,
-                )
-            )
-            self.fc_input_size = 480 * model_size
-        elif slice_len == 65536:
-            conv_layers.append(
-                Conv1D(
-                    16 * model_size,
-                    32 * model_size,
-                    25,
-                    stride=4,
-                    padding=11,
-                    use_batch_norm=use_batch_norm,
-                    alpha=alpha,
-                    shift_factor=0,
-                )
-            )
-            self.fc_input_size = 512 * model_size
-
         self.conv_layers = nn.ModuleList(conv_layers)
 
-        self.fc1 = nn.Linear(self.fc_input_size, 1)
+        self.fc1 = nn.Linear(256 * self.d, 1)
 
+        # Weight initialization.
         for m in self.modules():
             if isinstance(m, nn.Conv1d) or isinstance(m, nn.Linear):
                 nn.init.kaiming_normal_(m.weight.data)
@@ -346,7 +321,7 @@ class WaveGANDiscriminator(nn.Module):
             x = conv(x)
             if self.verbose:
                 print(x.shape)
-        x = x.view(-1, self.fc_input_size)
+        x = x.view(-1, 256 * self.d)
         if self.verbose:
             print(x.shape)
 
@@ -356,17 +331,17 @@ class WaveGANDiscriminator(nn.Module):
 if __name__ == "__main__":
     from torch.autograd import Variable
 
-    output_size = 16384
+    waveform_size = 16384
     noise_latent_dim = 100
 
-    G = WaveGANGenerator(verbose=True, use_batch_norm=True, output_size=output_size)
+    G = WaveGANGenerator(verbose=True, use_batch_norm=True, output_size=waveform_size)
     out = G(Variable(torch.randn(10, noise_latent_dim)))
     print(out.shape)
-    assert out.shape == (10, 1, output_size)
+    assert out.shape == (10, 1, waveform_size)
     print("==========================")
 
-    D = WaveGANDiscriminator(verbose=True, use_batch_norm=True, slice_len=output_size)
-    out2 = D(Variable(torch.randn(10, 1, output_size)))
+    D = WaveGANDiscriminator(verbose=True, use_batch_norm=True, input_size=waveform_size)
+    out2 = D(Variable(torch.randn(10, 1, waveform_size)))
     print(out2.shape)
     assert out2.shape == (10, 1)
     print("==========================")
