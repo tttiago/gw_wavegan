@@ -5,6 +5,8 @@ import torch.utils.data
 
 
 class Transpose1dLayer(nn.Module):
+    """1-dimensional transposed convolutional block, which may include dropout"""
+
     def __init__(
         self,
         in_channels,
@@ -15,15 +17,26 @@ class Transpose1dLayer(nn.Module):
         output_padding=1,
         use_batch_norm=False,
     ):
+        """Initialize Transpose1dLayer block.
+
+        Args:
+            in_channels (int): Number of input channels.
+            output_channels (int): Number of output channels.
+            kernel_size (int): Size of the 1D kernel used in the convolution.
+            stride (int, optional): Stride of the 1D convolution.
+            padding (int, optional): Padding of the 1D convolution. Defaults to 11.
+            output_padding (int, optional): Used to find the appropriate output dimension
+                                            (see PytTorch docs). Defaults to 1.
+            use_batch_norm (bool, optional): Whether to use batch normalization. Defaults to False.
+        """
+
         super().__init__()
 
-        # Define the possible operations.
         Conv1dTrans = nn.ConvTranspose1d(
             in_channels, out_channels, kernel_size, stride, padding, output_padding
         )
         batch_norm = nn.BatchNorm1d(out_channels)
 
-        # Define operation list, depending on the need for batch_norm.
         operation_list = [Conv1dTrans]
         if use_batch_norm:
             operation_list.append(batch_norm)
@@ -34,28 +47,44 @@ class Transpose1dLayer(nn.Module):
 
 
 class Conv1D(nn.Module):
+    """1D convolutional block, which may add batch normalization, phase shuffle and/or dropout."""
+
     def __init__(
         self,
-        input_channels,
+        in_channels,
         output_channels,
         kernel_size,
-        alpha=0.2,
-        shift_factor=2,
         stride=4,
         padding=11,
+        alpha=0.2,
+        shift_factor=2,
         use_batch_norm=False,
         drop_prob=0,
     ):
-        super(Conv1D, self).__init__()
+        """Initialize Conv1D block.
+
+        Args:
+            in_channels (int): Number of input channels.
+            output_channels (int): Number of output channels.
+            kernel_size (int): Size of the 1D kernel used in the convolution.
+            stride (int, optional): Stride of the 1D convolution. Defaults to 4.
+            padding (int, optional): Padding of the 1D convolution. Defaults to 11.
+            alpha (float, optional): Slope of the negative part of the LeakyRELU. Defaults to 0.2.
+            shift_factor (int, optional): Maximum amount of shifting used in PhaseShuffle. Defaults to 2.
+            use_batch_norm (bool, optional): Whether to use batch normalization. Defaults to False.
+            drop_prob (int, optional): Dropout probability. Defaults to 0.
+        """
+        super().__init__()
         self.conv1d = nn.Conv1d(
-            input_channels, output_channels, kernel_size, stride=stride, padding=padding
+            in_channels, output_channels, kernel_size, stride=stride, padding=padding
         )
-        self.batch_norm = nn.BatchNorm1d(output_channels)
-        self.phase_shuffle = PhaseShuffle(shift_factor)
-        self.alpha = alpha
         self.use_batch_norm = use_batch_norm
         self.use_phase_shuffle = shift_factor == 0
-        self.use_drop = drop_prob > 0
+        self.use_dropout = drop_prob > 0
+        self.alpha = alpha
+
+        self.batch_norm = nn.BatchNorm1d(output_channels)
+        self.phase_shuffle = PhaseShuffle(shift_factor)
         self.dropout = nn.Dropout2d(drop_prob)
 
     def forward(self, x):
