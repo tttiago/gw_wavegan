@@ -1,9 +1,7 @@
 import torch
 import torch.nn as nn
-from torch.nn import Parameter
 import torch.nn.functional as F
 import torch.utils.data
-from params import *
 
 
 class Transpose1dLayer(nn.Module):
@@ -14,32 +12,24 @@ class Transpose1dLayer(nn.Module):
         kernel_size,
         stride,
         padding=11,
-        upsample=None,
         output_padding=1,
         use_batch_norm=False,
     ):
-        super(Transpose1dLayer, self).__init__()
-        self.upsample = upsample
-        reflection_pad = nn.ConstantPad1d(kernel_size // 2, value=0)
-        conv1d = nn.Conv1d(in_channels, out_channels, kernel_size, stride)
-        conv1d.weight.data.normal_(0.0, 0.02)
+        super().__init__()
+
+        # Define the possible operations.
         Conv1dTrans = nn.ConvTranspose1d(
             in_channels, out_channels, kernel_size, stride, padding, output_padding
         )
         batch_norm = nn.BatchNorm1d(out_channels)
-        if self.upsample:
-            operation_list = [reflection_pad, conv1d]
-        else:
-            operation_list = [Conv1dTrans]
 
+        # Define operation list, depending on the need for batch_norm.
+        operation_list = [Conv1dTrans]
         if use_batch_norm:
             operation_list.append(batch_norm)
         self.transpose_ops = nn.Sequential(*operation_list)
 
     def forward(self, x):
-        if self.upsample:
-            # recommended by wavgan paper to use nearest upsampling
-            x = nn.functional.interpolate(x, scale_factor=self.upsample, mode="nearest")
         return self.transpose_ops(x)
 
 
@@ -96,10 +86,7 @@ class PhaseShuffle(nn.Module):
         if self.shift_factor == 0:
             return x
         # uniform in (L, R)
-        k_list = (
-            torch.Tensor(x.shape[0]).random_(0, 2 * self.shift_factor + 1)
-            - self.shift_factor
-        )
+        k_list = torch.Tensor(x.shape[0]).random_(0, 2 * self.shift_factor + 1) - self.shift_factor
         k_list = k_list.numpy().astype(int)
 
         # Combine sample indices into lists so that less shuffle operations
@@ -223,9 +210,7 @@ class WaveGANGenerator(nn.Module):
                     upsample=upsample,
                     use_batch_norm=use_batch_norm,
                 ),
-                Transpose1dLayer(
-                    model_size, num_channels, 25, stride, upsample=upsample
-                ),
+                Transpose1dLayer(model_size, num_channels, 25, stride, upsample=upsample),
             ]
         else:
             raise ValueError("slice_len {} value is not supported".format(slice_len))
@@ -381,9 +366,7 @@ if __name__ == "__main__":
 
     for slice_len in [16384, 32768, 65536]:
 
-        G = WaveGANGenerator(
-            verbose=True, upsample=True, use_batch_norm=True, slice_len=slice_len
-        )
+        G = WaveGANGenerator(verbose=True, upsample=True, use_batch_norm=True, slice_len=slice_len)
         out = G(Variable(torch.randn(10, noise_latent_dim)))
         print(out.shape)
         assert out.shape == (10, 1, slice_len)
@@ -394,4 +377,3 @@ if __name__ == "__main__":
         print(out2.shape)
         assert out2.shape == (10, 1)
         print("==========================")
-
