@@ -70,7 +70,8 @@ class Conv1D(nn.Module):
             stride (int, optional): Stride of the 1D convolution. Defaults to 4.
             padding (int, optional): Padding of the 1D convolution. Defaults to 11.
             alpha (float, optional): Slope of the negative part of the LeakyRELU. Defaults to 0.2.
-            shift_factor (int, optional): Maximum amount of shifting used in PhaseShuffle. Defaults to 2.
+            shift_factor (int, optional): Maximum amount of shifting used in PhaseShuffle.
+                                          Defaults to 2.
             use_batch_norm (bool, optional): Whether to use batch normalization. Defaults to False.
             drop_prob (int, optional): Dropout probability. Defaults to 0.
         """
@@ -107,22 +108,29 @@ class PhaseShuffle(nn.Module):
     """
 
     # Copied from https://github.com/jtcramer/wavegan/blob/master/wavegan.py#L8
+    # with some modifications.
+
     def __init__(self, shift_factor):
-        super(PhaseShuffle, self).__init__()
+        """Initialize PhaseShuffle block.
+
+        Args:
+            shift_factor (int): The maximum number of samples by which an axis
+                                can be shifted in each direction.
+        """
+        super().__init__()
         self.shift_factor = shift_factor
 
     def forward(self, x):
         if self.shift_factor == 0:
             return x
-        # uniform in (L, R)
+
+        # Uniform in (-shift_factor, +shift_factor)
         k_list = torch.Tensor(x.shape[0]).random_(0, 2 * self.shift_factor + 1) - self.shift_factor
         k_list = k_list.numpy().astype(int)
 
-        # Combine sample indices into lists so that less shuffle operations
-        # need to be performed
+        # Combine sample indices into lists so that less shuffle operations need to be performed.
         k_map = {}
         for idx, k in enumerate(k_list):
-            k = int(k)
             if k not in k_map:
                 k_map[k] = []
             k_map[k].append(idx)
