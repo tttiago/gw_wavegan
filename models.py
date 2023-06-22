@@ -332,6 +332,9 @@ if __name__ == "__main__":
     waveform_size = 16384
     noise_latent_dim = 100
 
+    print("Testing WaveGAN generator and discriminator.")
+    print("==========================")
+
     G = WaveGANGenerator(verbose=True, use_batch_norm=True, output_size=waveform_size)
     out = G(Variable(torch.randn(10, noise_latent_dim)))
     print(out.shape)
