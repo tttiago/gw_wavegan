@@ -15,7 +15,7 @@ class Transpose1dLayer(nn.Module):
         stride,
         padding=11,
         output_padding=1,
-        use_batch_norm=False,
+        use_batchnorm=False,
     ):
         """Initialize Transpose1dLayer block.
 
@@ -27,7 +27,7 @@ class Transpose1dLayer(nn.Module):
             padding (int, optional): Padding of the 1D convolution. Defaults to 11.
             output_padding (int, optional): Used to find the appropriate output dimension
                                             (see PytTorch docs). Defaults to 1.
-            use_batch_norm (bool, optional): Whether to use batch normalization. Defaults to False.
+            use_batchnorm (bool, optional): Whether to use batch normalization. Defaults to False.
         """
 
         super().__init__()
@@ -38,7 +38,7 @@ class Transpose1dLayer(nn.Module):
         batch_norm = nn.BatchNorm1d(out_channels)
 
         operation_list = [Conv1dTrans]
-        if use_batch_norm:
+        if use_batchnorm:
             operation_list.append(batch_norm)
         self.transpose_ops = nn.Sequential(*operation_list)
 
@@ -58,7 +58,7 @@ class Conv1D(nn.Module):
         padding=11,
         alpha=0.2,
         shift_factor=2,
-        use_batch_norm=False,
+        use_batchnorm=False,
         drop_prob=0,
     ):
         """Initialize Conv1D block.
@@ -72,14 +72,14 @@ class Conv1D(nn.Module):
             alpha (float, optional): Slope of the negative part of the LeakyRELU. Defaults to 0.2.
             shift_factor (int, optional): Maximum amount of shifting used in PhaseShuffle.
                                           Defaults to 2.
-            use_batch_norm (bool, optional): Whether to use batch normalization. Defaults to False.
+            use_batchnorm (bool, optional): Whether to use batch normalization. Defaults to False.
             drop_prob (int, optional): Dropout probability. Defaults to 0.
         """
         super().__init__()
         self.conv1d = nn.Conv1d(
             in_channels, output_channels, kernel_size, stride=stride, padding=padding
         )
-        self.use_batch_norm = use_batch_norm
+        self.use_batchnorm = use_batchnorm
         self.use_phase_shuffle = shift_factor == 0
         self.use_dropout = drop_prob > 0
         self.alpha = alpha
@@ -90,7 +90,7 @@ class Conv1D(nn.Module):
 
     def forward(self, x):
         x = self.conv1d(x)
-        if self.use_batch_norm:
+        if self.use_batchnorm:
             x = self.batch_norm(x)
         x = F.leaky_relu(x, negative_slope=self.alpha)
         if self.use_phase_shuffle:
@@ -155,21 +155,21 @@ class WaveGANGenerator(nn.Module):
     def __init__(
         self,
         noise_latent_dim=100,
-        num_channels=1,
+        n_channels=1,
         model_dim=64,
         output_size=16384,
-        use_batch_norm=False,
+        use_batchnorm=False,
         verbose=False,
     ):
         """Initialize the WaveGAN generator.
 
         Args:
             noise_latent_dim (int, optional): Dimension of the sampling noise. Defaults to 100.
-            num_channels (int, optional): Number of channels. Defaults to 1.
+            n_channels (int, optional): Number of channels. Defaults to 1.
             model_dim (int, optional): Model dimensionality (known as d in the WaveGAN paper).
                                        Defaults to 64.
             output_size (int, optional): Size of the output. Defaults to 16384.
-            use_batch_norm (bool, optional): Whether to use batch normalization. Defaults to False.
+            use_batchnorm (bool, optional): Whether to use batch normalization. Defaults to False.
             verbose (bool, optional): Whether to print tensor shapes. Defaults to False.
         """
 
@@ -178,30 +178,25 @@ class WaveGANGenerator(nn.Module):
 
         self.latent_dim = noise_latent_dim
         self.d = model_dim
-        self.c = num_channels
-        self.use_batch_norm = use_batch_norm
+        self.c = n_channels
+        self.use_batchnorm = use_batchnorm
         self.verbose = verbose
 
         self.fc1 = nn.Linear(self.latent_dim, 256 * self.d)
         self.bn1 = nn.BatchNorm1d(num_features=16 * self.d)
 
         deconv_layers = [
-            Transpose1dLayer(16 * self.d, 8 * self.d, 25, stride=4, use_batch_norm=use_batch_norm),
-            Transpose1dLayer(8 * self.d, 4 * self.d, 25, stride=4, use_batch_norm=use_batch_norm),
-            Transpose1dLayer(4 * self.d, 2 * self.d, 25, stride=4, use_batch_norm=use_batch_norm),
-            Transpose1dLayer(2 * self.d, 1 * self.d, 25, stride=4, use_batch_norm=use_batch_norm),
-            Transpose1dLayer(1 * self.d, 1 * self.c, 25, stride=4, use_batch_norm=use_batch_norm),
+            Transpose1dLayer(16 * self.d, 8 * self.d, 25, stride=4, use_batchnorm=use_batchnorm),
+            Transpose1dLayer(8 * self.d, 4 * self.d, 25, stride=4, use_batchnorm=use_batchnorm),
+            Transpose1dLayer(4 * self.d, 2 * self.d, 25, stride=4, use_batchnorm=use_batchnorm),
+            Transpose1dLayer(2 * self.d, 1 * self.d, 25, stride=4, use_batchnorm=use_batchnorm),
+            Transpose1dLayer(1 * self.d, 1 * self.c, 25, stride=4, use_batchnorm=use_batchnorm),
         ]
         self.deconv_layers = nn.ModuleList(deconv_layers)
 
-        # Weight initialization.
-        for m in self.modules():
-            if isinstance(m, nn.ConvTranspose1d) or isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight.data)
-
     def forward(self, x):
         x = self.fc1(x).view(-1, 16 * self.d, 16)
-        if self.use_batch_norm:
+        if self.use_batchnorm:
             x = self.bn1(x)
         x = F.relu(x)
         if self.verbose:
@@ -220,18 +215,18 @@ class WaveGANDiscriminator(nn.Module):
 
     def __init__(
         self,
-        num_channels=1,
+        n_channels=1,
         model_dim=64,
         input_size=16384,
         shift_factor=2,
         alpha=0.2,
-        use_batch_norm=False,
+        use_batchnorm=False,
         verbose=False,
     ):
         """Initialize the WaveGAN discriminator.
 
         Args:
-            num_channels (int, optional): Number of channels. Defaults to 1.
+            n_channels (int, optional): Number of channels. Defaults to 1.
             model_dim (int, optional): Model dimensionality (known as d in the WaveGAN paper).
                                        Defaults to 64.
             input_size (int, optional): Size of the input. Defaults to 16384.
@@ -239,7 +234,7 @@ class WaveGANDiscriminator(nn.Module):
                                           WaveGAN paper, by which an axis can be shifted
                                           in each direction. Defaults to 2.
             alpha (float, optional): Slope of the negative part of the LeakyRELU. Defaults to 0.2.
-            use_batch_norm (bool, optional): Whether to use batch normalization. Defaults to False.
+            use_batchnorm (bool, optional): Whether to use batch normalization. Defaults to False.
             verbose (bool, optional): Whether to print tensor shapes. Defaults to False.
         """
 
@@ -247,10 +242,10 @@ class WaveGANDiscriminator(nn.Module):
         assert input_size == 16384, "Only output_size of 16384 is implemented."
 
         self.d = model_dim
-        self.c = num_channels
+        self.c = n_channels
         self.n = shift_factor
         self.alpha = alpha
-        self.use_batch_norm = use_batch_norm
+        self.use_batchnorm = use_batchnorm
         self.verbose = verbose
 
         conv_layers = [
@@ -260,7 +255,7 @@ class WaveGANDiscriminator(nn.Module):
                 25,
                 stride=4,
                 padding=11,
-                use_batch_norm=use_batch_norm,
+                use_batchnorm=use_batchnorm,
                 alpha=alpha,
                 shift_factor=shift_factor,
             ),
@@ -270,7 +265,7 @@ class WaveGANDiscriminator(nn.Module):
                 25,
                 stride=4,
                 padding=11,
-                use_batch_norm=use_batch_norm,
+                use_batchnorm=use_batchnorm,
                 alpha=alpha,
                 shift_factor=shift_factor,
             ),
@@ -280,7 +275,7 @@ class WaveGANDiscriminator(nn.Module):
                 25,
                 stride=4,
                 padding=11,
-                use_batch_norm=use_batch_norm,
+                use_batchnorm=use_batchnorm,
                 alpha=alpha,
                 shift_factor=shift_factor,
             ),
@@ -290,7 +285,7 @@ class WaveGANDiscriminator(nn.Module):
                 25,
                 stride=4,
                 padding=11,
-                use_batch_norm=use_batch_norm,
+                use_batchnorm=use_batchnorm,
                 alpha=alpha,
                 shift_factor=shift_factor,
             ),
@@ -300,7 +295,7 @@ class WaveGANDiscriminator(nn.Module):
                 25,
                 stride=4,
                 padding=11,
-                use_batch_norm=use_batch_norm,
+                use_batchnorm=use_batchnorm,
                 alpha=alpha,
                 shift_factor=0,
             ),
@@ -308,11 +303,6 @@ class WaveGANDiscriminator(nn.Module):
         self.conv_layers = nn.ModuleList(conv_layers)
 
         self.fc1 = nn.Linear(256 * self.d, 1)
-
-        # Weight initialization.
-        for m in self.modules():
-            if isinstance(m, nn.Conv1d) or isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight.data)
 
     def forward(self, x):
         for conv in self.conv_layers:
@@ -335,13 +325,13 @@ if __name__ == "__main__":
     print("Testing WaveGAN generator and discriminator.")
     print("==========================")
 
-    G = WaveGANGenerator(verbose=True, use_batch_norm=True, output_size=waveform_size)
+    G = WaveGANGenerator(verbose=True, use_batchnorm=True, output_size=waveform_size)
     out = G(Variable(torch.randn(10, noise_latent_dim)))
     print(out.shape)
     assert out.shape == (10, 1, waveform_size)
     print("==========================")
 
-    D = WaveGANDiscriminator(verbose=True, use_batch_norm=True, input_size=waveform_size)
+    D = WaveGANDiscriminator(verbose=True, use_batchnorm=True, input_size=waveform_size)
     out2 = D(Variable(torch.randn(10, 1, waveform_size)))
     print(out2.shape)
     assert out2.shape == (10, 1)
