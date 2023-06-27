@@ -1,12 +1,12 @@
 import torch
 import torch.optim as optim
-from tqdm import tqdm
+from tqdm.auto import tqdm, trange
 
 from models import WaveGANDiscriminator, WaveGANGenerator
 from utils import get_noise, weights_init
 
 
-def train_WaveGAN(train_loader, params):
+def train_WaveGAN(data_loader, params):
     n_channels = params["n_channels"]
     waveform_length = params["waveform_length"]
     use_batchnorm = params["use_batchnorm"]
@@ -18,7 +18,7 @@ def train_WaveGAN(train_loader, params):
     disc_repeats = params["disc_repeats"]
     z_dim = params["z_dim"]
     c_lambda = params["c_lambda"]
-    display_step = params["display_lambda"]
+    display_step = params["display_step"]
 
     device = torch.device("cuda:0" if cuda else "cpu")
 
@@ -41,8 +41,8 @@ def train_WaveGAN(train_loader, params):
     optimizer_g = optim.Adam(generator.parameters(), lr=lr_g, betas=betas)
     optimizer_d = optim.Adam(discriminator.parameters(), lr=lr_d, betas=betas)
 
-    for epoch in tqdm(n_epochs):
-        for real, _ in tqdm(train_loader):
+    for epoch in trange(n_epochs):
+        for real, _ in tqdm(data_loader):
             real = real.to(device)
             batch_size = len(real)
             epsilon = torch.rand(batch_size, 1, 1, 1, device=device, requires_grad=True)
