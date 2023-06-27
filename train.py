@@ -45,7 +45,7 @@ def train_WaveGAN(data_loader, params):
         for real, _ in tqdm(data_loader):
             real = real.to(device)
             batch_size = len(real)
-            epsilon = torch.rand(batch_size, 1, 1, 1, device=device, requires_grad=True)
+            epsilon = torch.rand(batch_size, 1, 1, device=device, requires_grad=True)
 
         mean_iteration_disc_loss = 0
         for _ in range(disc_repeats):
@@ -150,7 +150,7 @@ def train_WaveGAN(data_loader, params):
 #             torch.save(saving_dict, gan_model_name)
 
 
-def get_gradient(disc, real, fake, epsilon):
+def get_gradient(discriminator, real, fake, epsilon):
     """
     Return the gradient of the discriminator's scores with respect to mixes of real and fake images.
     Parameters:
@@ -165,7 +165,7 @@ def get_gradient(disc, real, fake, epsilon):
     mixed_images = real * epsilon + fake * (1 - epsilon)
 
     # Calculate the discriminator's scores on the mixed images
-    mixed_scores = disc(mixed_images)
+    mixed_scores = discriminator(mixed_images)
 
     # Take the gradient of the scores with respect to the images
     gradient = torch.autograd.grad(
