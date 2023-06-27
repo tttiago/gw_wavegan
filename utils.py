@@ -1,19 +1,42 @@
-import os
-import time
-import math
-import torch
-import random
-import librosa
-import librosa.display
-import numpy as np
-from torch.utils import data
-import matplotlib
-import matplotlib.pyplot as plt
 import glob
-import pescador
+import math
+import os
+import random
+import time
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
 import torch.nn as nn
-from torch.autograd import Variable
 from params import *
+from torch.autograd import Variable
+from torch.utils import data
+
+
+#############################
+# Model Utils
+#############################
+def weights_init(m):
+    """Initialize weights of model."""
+    if isinstance(m, nn.ConvTranspose1d):
+        nn.init.kaiming_normal_(m.weight.data)
+    elif isinstance(m, nn.Linear):
+        nn.init.kaiming_normal_(m.weight.data)
+        m.bias.data.fill_(0)
+    elif isinstance(m, nn.Conv1d):
+        m.weight.data.normal_(0.0, 0.02)
+        m.bias.data.fill_(0)
+
+
+def update_optimizer_lr(optimizer, lr, decay):
+    for param_group in optimizer.param_groups:
+        param_group["lr"] = lr * decay
+
+
+def gradients_status(model, flag):
+    for p in model.parameters():
+        p.requires_grad = flag
+
 
 #############################
 # File Utils
@@ -182,31 +205,6 @@ def sample_noise(size):
 
 
 #############################
-# Model Utils
-#############################
-
-
-def update_optimizer_lr(optimizer, lr, decay):
-    for param_group in optimizer.param_groups:
-        param_group["lr"] = lr * decay
-
-
-def gradients_status(model, flag):
-    for p in model.parameters():
-        p.requires_grad = flag
-
-
-def weights_init(m):
-    if isinstance(m, nn.Conv1d):
-        m.weight.data.normal_(0.0, 0.02)
-        if m.bias is not None:
-            m.bias.data.fill_(0)
-        m.bias.data.fill_(0)
-    elif isinstance(m, nn.Linear):
-        m.bias.data.fill_(0)
-
-
-#############################
 # Creating Data Loader and Sampler
 #############################
 class WavDataLoader:
@@ -236,7 +234,8 @@ class WavDataLoader:
 
 if __name__ == "__main__":
     # For debugging purposes
-    import time 
+    import time
+
     start = time.time()
     print(time.time() - start)
     train_loader = WavDataLoader(os.path.join("piano", "train"), "wav")
