@@ -1,227 +1,240 @@
-from params import *
-from utils import *
-from models import *
-import torch.optim as optim
 import torch
-from torch.autograd import grad, Variable
+import torch.optim as optim
 from tqdm import tqdm
 
+from models import WaveGANDiscriminator, WaveGANGenerator
+from utils import get_noise, weights_init
 
-class WaveGan_GP(object):
-    def __init__(self, train_loader, val_loader):
-        super(WaveGan_GP, self).__init__()
-        self.g_cost = []
-        self.train_d_cost = []
-        self.train_w_distance = []
-        self.valid_g_cost = [-1]
-        self.valid_reconstruction = []
 
-        self.discriminator = WaveGANDiscriminator(
-            slice_len=window_length,
-            model_size=model_capacity_size,
-            use_batch_norm=use_batchnorm,
-            num_channels=num_channels,
-        ).to(device)
-        self.discriminator.apply(weights_init)
+def train_WaveGAN(train_loader, params):
+    n_channels = params["n_channels"]
+    waveform_length = params["waveform_length"]
+    use_batchnorm = params["use_batchnorm"]
+    cuda = params["cuda"]
+    lr_g = params["lr_g"]
+    lr_d = params["lr_d"]
+    betas = params["betas"]
+    n_epochs = params["n_epochs"]
+    disc_repeats = params["disc_repeats"]
+    z_dim = params["z_dim"]
+    c_lambda = params["c_lambda"]
+    display_step = params["display_lambda"]
 
-        self.generator = WaveGANGenerator(
-            slice_len=window_length,
-            model_size=model_capacity_size,
-            use_batch_norm=use_batchnorm,
-            num_channels=num_channels,
-        ).to(device)
-        self.generator.apply(weights_init)
+    device = torch.device("cuda:0" if cuda else "cpu")
 
-        self.optimizer_g = optim.Adam(
-            self.generator.parameters(), lr=lr_g, betas=(beta1, beta2)
-        )  # Setup Adam optimizers for both G and D
-        self.optimizer_d = optim.Adam(
-            self.discriminator.parameters(), lr=lr_d, betas=(beta1, beta2)
+    generator_losses = []
+    discriminator_losses = []
+
+    # Set up and initialize generator.
+    generator = WaveGANGenerator(
+        n_channels=n_channels, output_size=waveform_length, use_batchnorm=use_batchnorm
+    ).to(device)
+    generator.apply(weights_init)
+
+    # Set up and initialize discriminator.
+    discriminator = WaveGANDiscriminator(
+        n_channels=n_channels, input_size=waveform_length, use_batchnorm=use_batchnorm
+    ).to(device)
+    discriminator.apply(weights_init)
+
+    # Set up Adam optimizers for both G and D.
+    optimizer_g = optim.Adam(generator.parameters(), lr=lr_g, betas=betas)
+    optimizer_d = optim.Adam(discriminator.parameters(), lr=lr_d, betas=betas)
+
+    for epoch in tqdm(n_epochs):
+        for real, _ in tqdm(train_loader):
+            real = real.to(device)
+            batch_size = len(real)
+            epsilon = torch.rand(batch_size, 1, 1, 1, device=device, requires_grad=True)
+
+        mean_iteration_disc_loss = 0
+        for _ in range(disc_repeats):
+            # Update discriminator.
+            optimizer_d.zero_grad()
+            fake_noise = get_noise(batch_size, z_dim, device=device)
+            fake = generator(fake_noise)
+            disc_fake_pred = discriminator(fake.detach())
+            disc_real_pred = discriminator(real)
+            gradient = get_gradient(discriminator, real, fake.detach(), epsilon)
+            gp = gradient_penalty(gradient)
+            disc_loss = calculate_disc_loss(disc_fake_pred, disc_real_pred, gp, c_lambda)
+
+            # Keep track of the average discriminator loss in this batch.
+            mean_iteration_disc_loss += disc_loss.item() / disc_repeats
+            # Update gradients.
+            disc_loss.backward(retain_graph=True)
+            # Update weights.
+            optimizer_d.step()
+        discriminator_losses.append(mean_iteration_disc_loss)
+
+        # Update generator.
+        optimizer_g.zero_grad()
+        fake_noise_2 = get_noise(batch_size, z_dim, device=device)
+        fake_2 = generator(fake_noise_2)
+        disc_fake_pred = discriminator(fake_2)
+
+        gen_loss = calculate_gen_loss(disc_fake_pred)
+        # Update gradients.
+        gen_loss.backward()
+        # Update weights.
+        optimizer_g.step()
+
+        generator_losses.append(gen_loss.item())
+
+        print(
+            f"Generator loss: {generator_losses[-1]} | Discriminator loss {discriminator_losses[-1]}"
         )
 
-        self.train_loader = train_loader
-        self.val_loader = val_loader
 
-        self.validate = validate
-        self.n_samples_per_batch = len(train_loader)
+#     gan_model_name = "gan_{}.tar".format(model_prefix)
 
-    def calculate_discriminator_loss(self, real, generated):
-        disc_out_gen = self.discriminator(generated)
-        disc_out_real = self.discriminator(real)
+#     if take_backup and os.path.isfile(gan_model_name):
+#         if cuda:
+#             checkpoint = torch.load(gan_model_name)
+#         else:
+#             checkpoint = torch.load(gan_model_name, map_location="cpu")
+#         self.generator.load_state_dict(checkpoint["generator"])
+#         self.discriminator.load_state_dict(checkpoint["discriminator"])
+#         self.optimizer_d.load_state_dict(checkpoint["optimizer_d"])
+#         self.optimizer_g.load_state_dict(checkpoint["optimizer_g"])
+#         self.train_d_cost = checkpoint["train_d_cost"]
+#         self.train_w_distance = checkpoint["train_w_distance"]
+#         self.valid_g_cost = checkpoint["valid_g_cost"]
+#         self.g_cost = checkpoint["g_cost"]
 
-        alpha = torch.FloatTensor(batch_size, 1, 1).uniform_(0, 1).to(device)
-        alpha = alpha.expand(batch_size, real.size(1), real.size(2))
+#         first_iter = checkpoint["n_iterations"]
+#         for i in range(0, first_iter, progress_bar_step_iter_size):
+#             progress_bar.update()
+#         self.generator.eval()
+#         with torch.no_grad():
+#             fake = self.generator(fixed_noise).detach().cpu().numpy()
+#         save_samples(fake, first_iter)
 
-        interpolated = (1 - alpha) * real.data + (alpha) * generated.data[:batch_size]
-        interpolated = Variable(interpolated, requires_grad=True)
+#         if iter_indx % store_cost_every == 0:
+#             self.g_cost.append(generator_cost.item() * -1)
+#             self.train_d_cost.append(disc_cost.item())
+#             self.train_w_distance.append(disc_wd.item() * -1)
 
-        # calculate probability of interpolated examples
-        prob_interpolated = self.discriminator(interpolated)
-        grad_inputs = interpolated
-        ones = torch.ones(prob_interpolated.size()).to(device)
-        gradients = grad(
-            outputs=prob_interpolated,
-            inputs=grad_inputs,
-            grad_outputs=ones,
-            create_graph=True,
-            retain_graph=True,
-            only_inputs=True,
-        )[0]
-        # calculate gradient penalty
-        grad_penalty = (
-            p_coeff
-            * ((gradients.view(gradients.size(0), -1).norm(2, dim=1) - 1) ** 2).mean()
-        )
-        assert not (torch.isnan(grad_penalty))
-        assert not (torch.isnan(disc_out_gen.mean()))
-        assert not (torch.isnan(disc_out_real.mean()))
-        cost_wd = disc_out_gen.mean() - disc_out_real.mean()
-        cost = cost_wd + grad_penalty
-        return cost, cost_wd
+#             progress_updates = {
+#                 "Loss_D WD": str(self.train_w_distance[-1]),
+#                 "Loss_G": str(self.g_cost[-1]),
+#                 "Val_G": str(self.valid_g_cost[-1]),
+#             }
+#             progress_bar.set_postfix(progress_updates)
 
-    def apply_zero_grad(self):
-        self.generator.zero_grad()
-        self.optimizer_g.zero_grad()
+#         # lr decay
+#         if decay_lr:
+#             decay = max(0.0, 1.0 - (iter_indx * 1.0 / n_iterations))
+#             # update the learning rate
+#             update_optimizer_lr(self.optimizer_d, lr_d, decay)
+#             update_optimizer_lr(self.optimizer_g, lr_g, decay)
 
-        self.discriminator.zero_grad()
-        self.optimizer_d.zero_grad()
+#         if iter_indx % save_samples_every == 0:
+#             with torch.no_grad():
+#                 latent_space_interpolation(self.generator, n_samples=2)
+#                 fake = self.generator(fixed_noise).detach().cpu().numpy()
+#             save_samples(fake, iter_indx)
 
-    def enable_disc_disable_gen(self):
-        gradients_status(self.discriminator, True)
-        gradients_status(self.generator, False)
+#         if take_backup and iter_indx % backup_every_n_iters == 0:
+#             saving_dict = {
+#                 "generator": self.generator.state_dict(),
+#                 "discriminator": self.discriminator.state_dict(),
+#                 "n_iterations": iter_indx,
+#                 "optimizer_d": self.optimizer_d.state_dict(),
+#                 "optimizer_g": self.optimizer_g.state_dict(),
+#                 "train_d_cost": self.train_d_cost,
+#                 "train_w_distance": self.train_w_distance,
+#                 "valid_g_cost": self.valid_g_cost,
+#                 "g_cost": self.g_cost,
+#             }
+#             torch.save(saving_dict, gan_model_name)
 
-    def enable_gen_disable_disc(self):
-        gradients_status(self.discriminator, False)
-        gradients_status(self.generator, True)
 
-    def disable_all(self):
-        gradients_status(self.discriminator, False)
-        gradients_status(self.generator, False)
+def get_gradient(disc, real, fake, epsilon):
+    """
+    Return the gradient of the discriminator's scores with respect to mixes of real and fake images.
+    Parameters:
+        disc: the discriminator model
+        real: a batch of real images
+        fake: a batch of fake images
+        epsilon: a vector of the uniformly random proportions of real/fake per mixed image
+    Returns:
+        gradient: the gradient of the discriminator's scores, with respect to the mixed image
+    """
+    # Mix the images together
+    mixed_images = real * epsilon + fake * (1 - epsilon)
 
-    def train(self):
-        progress_bar = tqdm(total=n_iterations // progress_bar_step_iter_size)
-        fixed_noise = sample_noise(batch_size).to(
-            device
-        )  # used to save samples every few epochs
+    # Calculate the discriminator's scores on the mixed images
+    mixed_scores = disc(mixed_images)
 
-        gan_model_name = "gan_{}.tar".format(model_prefix)
+    # Take the gradient of the scores with respect to the images
+    gradient = torch.autograd.grad(
+        inputs=mixed_images,
+        outputs=mixed_scores,
+        grad_outputs=torch.ones_like(mixed_scores),
+        create_graph=True,
+        retain_graph=True,
+    )[0]
+    return gradient
 
-        first_iter = 0
-        if take_backup and os.path.isfile(gan_model_name):
-            if cuda:
-                checkpoint = torch.load(gan_model_name)
-            else:
-                checkpoint = torch.load(gan_model_name, map_location="cpu")
-            self.generator.load_state_dict(checkpoint["generator"])
-            self.discriminator.load_state_dict(checkpoint["discriminator"])
-            self.optimizer_d.load_state_dict(checkpoint["optimizer_d"])
-            self.optimizer_g.load_state_dict(checkpoint["optimizer_g"])
-            self.train_d_cost = checkpoint["train_d_cost"]
-            self.train_w_distance = checkpoint["train_w_distance"]
-            self.valid_g_cost = checkpoint["valid_g_cost"]
-            self.g_cost = checkpoint["g_cost"]
 
-            first_iter = checkpoint["n_iterations"]
-            for i in range(0, first_iter, progress_bar_step_iter_size):
-                progress_bar.update()
-            self.generator.eval()
-            with torch.no_grad():
-                fake = self.generator(fixed_noise).detach().cpu().numpy()
-            save_samples(fake, first_iter)
-        self.generator.train()
-        self.discriminator.train()
-        for iter_indx in range(first_iter, n_iterations):
-            self.enable_disc_disable_gen()
-            for _ in range(n_critic):
-                real_signal = next(self.train_loader)
+def gradient_penalty(gradient):
+    """
+    Return the gradient penalty, given a gradient.
+    Given a batch of image gradients, you calculate the magnitude of each image's gradient
+    and penalize the mean quadratic distance of each magnitude to 1.
+    Parameters:
+        gradient: the gradient of the discriminator's scores, with respect to the mixed image
+    Returns:
+        penalty: the gradient penalty
+    """
+    # Flatten the gradients so that each row captures one image
+    gradient = gradient.view(len(gradient), -1)
 
-                # need to add mixed signal and flag
-                noise = sample_noise(batch_size * generator_batch_size_factor)
-                generated = self.generator(noise)
-                #############################
-                # Calculating discriminator loss and updating discriminator
-                #############################
-                self.apply_zero_grad()
-                disc_cost, disc_wd = self.calculate_discriminator_loss(
-                    real_signal.data, generated.data
-                )
-                assert not (torch.isnan(disc_cost))
-                disc_cost.backward()
-                self.optimizer_d.step()
+    # Calculate the magnitude of every row
+    gradient_norm = gradient.norm(2, dim=1)
 
-            if self.validate and iter_indx % store_cost_every == 0:
-                self.disable_all()
-                val_data = next(self.val_loader)
-                val_real = val_data
-                with torch.no_grad():
-                    val_discriminator_output = self.discriminator(val_real)
-                    val_generator_cost = val_discriminator_output.mean()
-                    self.valid_g_cost.append(val_generator_cost.item())
+    # Penalize the mean squared distance of the gradient norms from 1
+    penalty = (gradient_norm - 1).square().mean()
+    assert not (torch.isnan(penalty))
+    return penalty
 
-            #############################
-            # (2) Update G network every n_critic steps
-            #############################
-            self.apply_zero_grad()
-            self.enable_gen_disable_disc()
-            noise = sample_noise(batch_size * generator_batch_size_factor)
-            generated = self.generator(noise)
-            discriminator_output_fake = self.discriminator(generated)
-            generator_cost = -discriminator_output_fake.mean()
-            generator_cost.backward()
-            self.optimizer_g.step()
-            self.disable_all()
 
-            if iter_indx % store_cost_every == 0:
-                self.g_cost.append(generator_cost.item() * -1)
-                self.train_d_cost.append(disc_cost.item())
-                self.train_w_distance.append(disc_wd.item() * -1)
+def calculate_gen_loss(disc_fake_pred):
+    """
+    Return the loss of a generator given the discriminator's scores of the generator's fake images.
+    Parameters:
+        disc_fake_pred: the discriminator's scores of the fake images
+    Returns:
+        gen_loss: a scalar loss value for the current batch of the generator
+    """
+    gen_loss = -disc_fake_pred.mean()
+    return gen_loss
 
-                progress_updates = {
-                    "Loss_D WD": str(self.train_w_distance[-1]),
-                    "Loss_G": str(self.g_cost[-1]),
-                    "Val_G": str(self.valid_g_cost[-1]),
-                }
-                progress_bar.set_postfix(progress_updates)
 
-            if iter_indx % progress_bar_step_iter_size == 0:
-                progress_bar.update()
-            # lr decay
-            if decay_lr:
-                decay = max(0.0, 1.0 - (iter_indx * 1.0 / n_iterations))
-                # update the learning rate
-                update_optimizer_lr(self.optimizer_d, lr_d, decay)
-                update_optimizer_lr(self.optimizer_g, lr_g, decay)
+def calculate_disc_loss(disc_fake_pred, disc_real_pred, gp, c_lambda):
+    """
+    Return the loss of a discriminator given the discriminator's scores for fake and real images,
+    the gradient penalty, and gradient penalty weight.
+    Parameters:
+        disc_fake_pred: the discriminator's scores of the fake images
+        disc_real_pred: the discriminator's scores of the real images
+        gp: the unweighted gradient penalty
+        c_lambda: the current weight of the gradient penalty
+    Returns:
+        disc_loss: a scalar for the discriminator's loss, accounting for the relevant factors
+    """
+    assert not (torch.isnan(disc_fake_pred.mean()))
+    assert not (torch.isnan(disc_real_pred.mean()))
 
-            if iter_indx % save_samples_every == 0:
-                with torch.no_grad():
-                    latent_space_interpolation(self.generator, n_samples=2)
-                    fake = self.generator(fixed_noise).detach().cpu().numpy()
-                save_samples(fake, iter_indx)
-
-            if take_backup and iter_indx % backup_every_n_iters == 0:
-                saving_dict = {
-                    "generator": self.generator.state_dict(),
-                    "discriminator": self.discriminator.state_dict(),
-                    "n_iterations": iter_indx,
-                    "optimizer_d": self.optimizer_d.state_dict(),
-                    "optimizer_g": self.optimizer_g.state_dict(),
-                    "train_d_cost": self.train_d_cost,
-                    "train_w_distance": self.train_w_distance,
-                    "valid_g_cost": self.valid_g_cost,
-                    "g_cost": self.g_cost,
-                }
-                torch.save(saving_dict, gan_model_name)
-
-        self.generator.eval()
+    disc_loss = disc_fake_pred.mean() - disc_real_pred.mean() + c_lambda * gp
+    return disc_loss
 
 
 if __name__ == "__main__":
-    train_loader = WavDataLoader(os.path.join(target_signals_dir, "train"))
-    val_loader = WavDataLoader(os.path.join(target_signals_dir, "valid"))
-
-    wave_gan = WaveGan_GP(train_loader, val_loader)
-    wave_gan.train()
-    visualize_loss(
-        wave_gan.g_cost, wave_gan.valid_g_cost, "Train", "Val", "Negative Critic Loss"
-    )
-    latent_space_interpolation(wave_gan.generator, n_samples=5)
+    cuda = torch.cuda.is_available()
+    manual_seed = 42
+    torch.manual_seed(manual_seed)
+    if cuda:
+        torch.cuda.manual_seed(manual_seed)
+        torch.cuda.empty_cache()
